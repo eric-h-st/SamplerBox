@@ -13,4 +13,5 @@ USE_SYSTEMLED = False                   # Flashing LED after successful boot, on
 SERIALPORT_PORT = '/dev/ttyAMA0'
 SERIALPORT_BAUDRATE = 31250
 PITCHBAND_NOTE_RANGE = 2                # Pitchband note range, each direction
+IGNORE_MIDI_DEVICES =  [b'Impulse 20:1', b'Impulse 20:2']
 
