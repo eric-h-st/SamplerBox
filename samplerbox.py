@@ -106,6 +106,8 @@ class PlayingSound:
 
 class Sound:
     def __init__(self, filename, midinote, velocity):
+        global pitchbend
+
         wf = waveread(filename)
         self.fname = filename
         self.midinote = midinote
@@ -144,8 +146,10 @@ playingnotes = {}
 sustainplayingnotes = []
 sustain = False
 playingsounds = []
-globalvolume = 10 ** (-12.0/20)  # -12dB default global volume
+globalvolume = globalsoundvolume = DEFAULT_VOLUME = 10 ** (-12.0/20)  # -12dB default global volume
+globalvolumeknob = 64
 globaltranspose = 0
+pitchbend = 0
 
 #########################################
 # AUDIO AND MIDI CALLBACKS
@@ -154,9 +158,10 @@ globaltranspose = 0
 
 def AudioCallback(outdata, frame_count, time_info, status):
     global playingsounds
+    global pitchbend
     rmlist = []
     playingsounds = playingsounds[-MAX_POLYPHONY:]
-    b = samplerbox_audio.mixaudiobuffers(playingsounds, rmlist, frame_count, FADEOUT, FADEOUTLENGTH, SPEED)
+    b = samplerbox_audio.mixaudiobuffers(playingsounds, rmlist, frame_count, FADEOUT, FADEOUTLENGTH, SPEED, pitchbend, PITCHBAND_NOTE_RANGE)
     for e in rmlist:
         try:
             playingsounds.remove(e)
@@ -168,6 +173,7 @@ def AudioCallback(outdata, frame_count, time_info, status):
 def MidiCallback(message, time_stamp):
     global playingnotes, sustain, sustainplayingnotes
     global preset
+    global pitchbend, globalvolume, globalsoundvolume, globalvolumeknob
     messagetype = message[0] >> 4
     messagechannel = (message[0] & 15) + 1
     note = message[1] if len(message) > 1 else None
@@ -175,7 +181,12 @@ def MidiCallback(message, time_stamp):
     velocity = message[2] if len(message) > 2 else None
     if messagetype == 9 and velocity == 0:
         messagetype = 8
-    if messagetype == 9:    # Note on
+    if messagetype == 11 and midinote == 49: # Volume
+        globalvolumeknob = velocity
+        globalvolume = globalsoundvolume * (globalvolumeknob/127)
+    elif messagetype == 14: # Pitchband
+        pitchbend = velocity - 64
+    elif messagetype == 9:    # Note on
         midinote += globaltranspose
         try:
             playingnotes.setdefault(midinote, []).append(samples[midinote, velocity].play(midinote))
@@ -230,10 +241,11 @@ def ActuallyLoad():
     global preset
     global samples
     global playingsounds
-    global globalvolume, globaltranspose
+    global globalvolume, globaltranspose, globalsoundvolume, globalvolumeknob
     playingsounds = []
     samples = {}
-    globalvolume = 10 ** (-12.0/20)  # -12dB default global volume
+    globalsoundvolume = DEFAULT_VOLUME
+    globalvolume = globalsoundvolume * (globalvolumeknob/127)
     globaltranspose = 0
     samplesdir = SAMPLES_DIR if os.listdir(SAMPLES_DIR) else '.'      # use current folder (containing 0 Saw) if no user media containing samples has been found
     basename = next((f for f in os.listdir(samplesdir) if f.startswith("%d " % preset)), None)      # or next(glob.iglob("blah*"), None)
@@ -251,7 +263,8 @@ def ActuallyLoad():
             for i, pattern in enumerate(definitionfile):
                 try:
                     if r'%%volume' in pattern:        # %%paramaters are global parameters
-                        globalvolume *= 10 ** (float(pattern.split('=')[1].strip()) / 20)
+                        globalsoundvolume *= 10 ** (float(pattern.split('=')[1].strip()) / 20)
+                        globalvolume = globalsoundvolume * (globalvolumeknob/127)
                         continue
                     if r'%%transpose' in pattern:
                         globaltranspose = int(pattern.split('=')[1].strip())

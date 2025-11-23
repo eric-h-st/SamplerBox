@@ -14,7 +14,7 @@ import cython
 import numpy
 cimport numpy
 
-def mixaudiobuffers(list playingsounds, list rmlist, int frame_count, numpy.ndarray FADEOUT, int FADEOUTLENGTH, numpy.ndarray SPEED):
+def mixaudiobuffers(list playingsounds, list rmlist, int frame_count, numpy.ndarray FADEOUT, int FADEOUTLENGTH, numpy.ndarray SPEED, pitchbend, pitchbandnoterange):
     cdef int i, ii, k, l, N, length, looppos, fadeoutpos
     cdef float speed, newsz, pos, j
     cdef numpy.ndarray b = numpy.zeros(2 * frame_count, numpy.float32)      # output buffer
@@ -29,7 +29,8 @@ def mixaudiobuffers(list playingsounds, list rmlist, int frame_count, numpy.ndar
         looppos = snd.sound.loop
         length = snd.sound.nframes
         speed = SPEED[snd.note - snd.sound.midinote]
-        newsz = frame_count * speed
+        speed += (SPEED[snd.note - snd.sound.midinote + pitchbandnoterange] - speed) * pitchbend / 64
+        newsz = frame_count * speed 
         z = snd.sound.data
         zz = <short *> (z.data)
 
@@ -60,17 +61,17 @@ def mixaudiobuffers(list playingsounds, list rmlist, int frame_count, numpy.ndar
         else:
             ii = 0            
             for i in range(N):
-                j = pos + ii * speed
+                j = pos + ii * speed 
                 ii += 1                  
                 k = <int> j
                 if k > length - 2:
                     pos = looppos + 1
                     snd.pos = pos
                     ii = 0
-                    j = pos + ii * speed   
+                    j = pos + ii * speed  
                     k = <int> j  
                 bb[2 * i] += zz[2 * k] + (j - k) * (zz[2 * k + 2] - zz[2 * k])                                               # linear interpolation
-                bb[2 * i + 1] += zz[2 * k + 1] + (j - k) * (zz[2 * k + 3] - zz[2 * k + 1])
+                bb[2 * i + 1] += zz[2 * k + 1] + (j - k) * (zz[2 * k + 3] - zz[2 * k + 1]) 
 
         snd.pos += ii * speed
 
