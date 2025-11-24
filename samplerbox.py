@@ -226,13 +226,13 @@ def MidiCallback(message, time_stamp):
 LoadingThread = None
 LoadingInterrupt = False
 
-def LoadSamples():
+def LoadSamples(batch = False):
     global globalpreset
     global globalcurrentmidichannel
     global LoadingThread
     global LoadingInterrupt
 
-    if LoadingThread:
+    if not batch and LoadingThread:
         LoadingInterrupt = True
         LoadingThread.join()
         LoadingThread = None
@@ -241,6 +241,7 @@ def LoadSamples():
     LoadingThread = threading.Thread(target=ActuallyLoad, kwargs = {"preset": globalpreset, "midichannel": globalcurrentmidichannel})
     LoadingThread.daemon = True
     LoadingThread.start()
+
 
 NOTES = ["c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b"]
 
@@ -258,7 +259,7 @@ def ActuallyLoad(preset, midichannel):
     if basename:
         dirname = os.path.join(samplesdir, basename)
     if not basename:
-        print('Channel %s preset empty: %s' % (channel, preset))
+        print('Channel %s preset empty: %s' % (midichannel, preset))
         display("E%03d" % preset) # TBD support channel
         return
     print('Channel %s preset loading: %s (%s)' % (midichannel, preset, basename))
@@ -428,9 +429,17 @@ if USE_SERIALPORT_MIDI:
 #
 #########################################
 
-globalpreset = 0
-globalcurrentmidichannel = 1
-LoadSamples()
+if AUTO_LOAD_PROGRAMS and len(AUTO_LOAD_PROGRAMS) >= 1 and len(AUTO_LOAD_PROGRAMS) <= 16:
+    midichannel = 1
+    for program in AUTO_LOAD_PROGRAMS:
+        globalcurrentmidichannel = midichannel
+        midichannel += 1
+        globalpreset = program
+        LoadSamples(True)
+else:
+    globalpreset = 0
+    globalcurrentmidichannel = 1
+    LoadSamples()
 
 #########################################
 # SYSTEM LED

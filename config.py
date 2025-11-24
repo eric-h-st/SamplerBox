@@ -14,4 +14,5 @@ SERIALPORT_PORT = '/dev/ttyAMA0'
 SERIALPORT_BAUDRATE = 31250
 PITCHBAND_NOTE_RANGE = 2                # Pitchband note range, each direction
 IGNORE_MIDI_DEVICES =  []               # Ignore MIDI devices to avoid midi errors and missing/lingering notes. For example: [b'Impulse 20:1', b'Impulse 20:2']
+AUTO_LOAD_PROGRAMS =  []                # Upon start, automatically load the programs into midi channels, starting with 1. For example: [1,2,10,6,2] will go to MIDI channels 1-5 respectively. Must not exceed 16 items. 
 
