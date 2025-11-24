@@ -61,17 +61,17 @@ def mixaudiobuffers(list playingsounds, list rmlist, int frame_count, numpy.ndar
         else:
             ii = 0            
             for i in range(N):
-                j = pos + ii * speed 
+                j = pos + ii * speed
                 ii += 1                  
                 k = <int> j
                 if k > length - 2:
                     pos = looppos + 1
                     snd.pos = pos
                     ii = 0
-                    j = pos + ii * speed  
+                    j = pos + ii * speed
                     k = <int> j  
                 bb[2 * i] += zz[2 * k] + (j - k) * (zz[2 * k + 2] - zz[2 * k])                                               # linear interpolation
-                bb[2 * i + 1] += zz[2 * k + 1] + (j - k) * (zz[2 * k + 3] - zz[2 * k + 1]) 
+                bb[2 * i + 1] += zz[2 * k + 1] + (j - k) * (zz[2 * k + 3] - zz[2 * k + 1])
 
         snd.pos += ii * speed
 

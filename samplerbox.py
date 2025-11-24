@@ -147,7 +147,7 @@ sustainplayingnotes = []
 sustain = False
 playingsounds = []
 globalvolume = globalsoundvolume = DEFAULT_VOLUME = 10 ** (-12.0/20)  # -12dB default global volume
-globalvolumeknob = 64
+globalvolumeknob = 127
 globaltranspose = 0
 pitchbend = 0
 
