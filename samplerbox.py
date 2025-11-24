@@ -100,18 +100,17 @@ class PlayingSound:
 
     def stop(self):
         try:
-            playingsounds.remove(self)
+            sound.playingsounds.remove(self)
         except:
             pass
 
 class Sound:
-    def __init__(self, filename, midinote, velocity):
-        global pitchbend
-
+    def __init__(self, playingsounds, filename, midinote, velocity):
         wf = waveread(filename)
         self.fname = filename
         self.midinote = midinote
         self.velocity = velocity
+        self.playingsounds = playingsounds
         if wf.getloops():
             self.loop = wf.getloops()[0][0]
             self.nframes = wf.getloops()[0][1] + 2
@@ -123,7 +122,7 @@ class Sound:
 
     def play(self, note):
         snd = PlayingSound(self, note)
-        playingsounds.append(snd)
+        self.playingsounds.append(snd)
         return snd
 
     def frames2array(self, data, sampwidth, numchan):
@@ -141,15 +140,14 @@ FADEOUT = numpy.power(FADEOUT, 6)
 FADEOUT = numpy.append(FADEOUT, numpy.zeros(FADEOUTLENGTH, numpy.float32)).astype(numpy.float32)
 SPEED = numpy.power(2, numpy.arange(0.0, 84.0)/12).astype(numpy.float32)
 
-samples = {}
 playingnotes = {}
 sustainplayingnotes = []
 sustain = False
-playingsounds = []
 globalvolume = globalsoundvolume = DEFAULT_VOLUME = 10 ** (-12.0/20)  # -12dB default global volume
 globalvolumeknob = 127
 globaltranspose = 0
-pitchbend = 0
+globalpitchbend = 0
+globalmidichannels = [{ 'samples': None, 'playingsounds': None } for i in range(16)]
 
 #########################################
 # AUDIO AND MIDI CALLBACKS
@@ -157,14 +155,19 @@ pitchbend = 0
 #########################################
 
 def AudioCallback(outdata, frame_count, time_info, status):
-    global playingsounds
-    global pitchbend
+    global globalmidichannels
+    global globalpitchbend
     rmlist = []
+
+    playingsounds = []
+    for midichannel in globalmidichannels:
+      if midichannel['playingsounds']:
+          playingsounds.extend(midichannel['playingsounds'])
     playingsounds = playingsounds[-MAX_POLYPHONY:]
-    b = samplerbox_audio.mixaudiobuffers(playingsounds, rmlist, frame_count, FADEOUT, FADEOUTLENGTH, SPEED, pitchbend, PITCHBAND_NOTE_RANGE)
+    b = samplerbox_audio.mixaudiobuffers(playingsounds, rmlist, frame_count, FADEOUT, FADEOUTLENGTH, SPEED, globalpitchbend, PITCHBAND_NOTE_RANGE)
     for e in rmlist:
         try:
-            playingsounds.remove(e)
+           e.sound.playingsounds.remove(e)
         except:
             pass
     b *= globalvolume
@@ -172,27 +175,28 @@ def AudioCallback(outdata, frame_count, time_info, status):
 
 def MidiCallback(message, time_stamp):
     global playingnotes, sustain, sustainplayingnotes
-    global preset
-    global pitchbend, globalvolume, globalsoundvolume, globalvolumeknob
+    global globalpreset, globalcurrentmidichannel
+    global globalpitchbend, globalvolume, globalsoundvolume, globalvolumeknob
     messagetype = message[0] >> 4
     messagechannel = (message[0] & 15) + 1
     note = message[1] if len(message) > 1 else None
     midinote = note
     velocity = message[2] if len(message) > 2 else None
+
     if messagetype == 9 and velocity == 0:
         messagetype = 8
-    if messagetype == 11 and midinote == 49: # Volume
+    if messagetype == 11 and midinote == 49: # Volume (affects all midi channels)
         globalvolumeknob = velocity
         globalvolume = globalsoundvolume * (globalvolumeknob/127)
-    elif messagetype == 14: # Pitchband
-        pitchbend = velocity - 64
-    elif messagetype == 9:    # Note on
+    elif messagetype == 14: # Pitchband (affects all midi channels)
+        globalpitchbend = velocity - 64
+    elif messagetype == 9:    # Note on (affects the selected midi channel)
         midinote += globaltranspose
         try:
-            playingnotes.setdefault(midinote, []).append(samples[midinote, velocity].play(midinote))
-        except:
+            playingnotes.setdefault(midinote, []).append(globalmidichannels[messagechannel - 1]['samples'][midinote, velocity].play(midinote))
+        except Exception as e:
             pass
-    elif messagetype == 8:  # Note off
+    elif messagetype == 8:  # Note off (affects the selected midi channels)
         midinote += globaltranspose
         if midinote in playingnotes:
             for n in playingnotes[midinote]:
@@ -201,16 +205,17 @@ def MidiCallback(message, time_stamp):
                 else:
                     n.fadeout(50)
             playingnotes[midinote] = []
-    elif messagetype == 12:  # Program change
-        print('Program change ' + str(note))
-        preset = note
+    elif messagetype == 12:  # Program change (affects the selected midi channel)
+        print('Program change %s on channel %s' % (str(note), messagechannel - 1))
+        globalpreset = note
+        globalcurrentmidichannel = messagechannel
         LoadSamples()
-    elif (messagetype == 11) and (note == 64) and (velocity < 64):  # sustain pedal off
+    elif (messagetype == 11) and (note == 64) and (velocity < 64):  # sustain pedal off (affects all midi channels)
         for n in sustainplayingnotes:
             n.fadeout(50)
         sustainplayingnotes = []
         sustain = False
-    elif (messagetype == 11) and (note == 64) and (velocity >= 64):  # sustain pedal on
+    elif (messagetype == 11) and (note == 64) and (velocity >= 64):  # sustain pedal on (affects all midi channels)
         sustain = True
 
 #########################################
@@ -222,6 +227,8 @@ LoadingThread = None
 LoadingInterrupt = False
 
 def LoadSamples():
+    global globalpreset
+    global globalcurrentmidichannel
     global LoadingThread
     global LoadingInterrupt
 
@@ -231,17 +238,16 @@ def LoadSamples():
         LoadingThread = None
 
     LoadingInterrupt = False
-    LoadingThread = threading.Thread(target=ActuallyLoad)
+    LoadingThread = threading.Thread(target=ActuallyLoad, kwargs = {"preset": globalpreset, "midichannel": globalcurrentmidichannel})
     LoadingThread.daemon = True
     LoadingThread.start()
 
 NOTES = ["c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b"]
 
-def ActuallyLoad():
-    global preset
-    global samples
-    global playingsounds
+def ActuallyLoad(preset, midichannel):
+    global globalmidichannels
     global globalvolume, globaltranspose, globalsoundvolume, globalvolumeknob
+
     playingsounds = []
     samples = {}
     globalsoundvolume = DEFAULT_VOLUME
@@ -252,11 +258,11 @@ def ActuallyLoad():
     if basename:
         dirname = os.path.join(samplesdir, basename)
     if not basename:
-        print('Preset empty: %s' % preset)
-        display("E%03d" % preset)
+        print('Channel %s preset empty: %s' % (channel, preset))
+        display("E%03d" % preset) # TBD support channel
         return
-    print('Preset loading: %s (%s)' % (preset, basename))
-    display("L%03d" % preset)
+    print('Channel %s preset loading: %s (%s)' % (midichannel, preset, basename))
+    display("L%03d" % preset) # TBD support channel
     definitionfname = os.path.join(dirname, "definition.txt")
     if os.path.isfile(definitionfname):
         with open(definitionfname, 'r') as definitionfile:
@@ -287,7 +293,7 @@ def ActuallyLoad():
                             notename = info.get('notename', defaultparams['notename'])
                             if notename:
                                 midinote = NOTES.index(notename[:-1].lower()) + (int(notename[-1])+2) * 12
-                            samples[midinote, velocity] = Sound(os.path.join(dirname, fname), midinote, velocity)
+                            samples[midinote, velocity] = Sound(playingsounds, os.path.join(dirname, fname), midinote, velocity)
                 except:
                     print("Error in definition file, skipping line %s." % (i+1))
     else:
@@ -296,7 +302,7 @@ def ActuallyLoad():
                 return
             file = os.path.join(dirname, "%d.wav" % midinote)
             if os.path.isfile(file):
-                samples[midinote, 127] = Sound(file, midinote, 127)
+                samples[midinote, 127] = Sound(playingsounds, file, midinote, 127)
     initial_keys = set(samples.keys())
     for midinote in range(128):
         lastvelocity = None
@@ -315,11 +321,12 @@ def ActuallyLoad():
                 except:
                     pass
     if len(initial_keys) > 0:
-        print('Preset loaded: ' + str(preset))
-        display("%04d" % preset)
+        print('Channel %s preset %s loaded' % (midichannel, preset))
+        display("%04d" % preset) # TBD: Support channel
     else:
-        print('Preset empty: ' + str(preset))
-        display("E%03d" % preset)
+        print('Channel %s preset %s EMPTY' % (midichannel, preset))
+        display("E%03d" % preset) # TBD: Support channel
+    globalmidichannels[midichannel-1] = { 'samples': samples, 'playingsounds': playingsounds }
 
 #########################################
 # OPEN AUDIO DEVICE
@@ -346,20 +353,20 @@ if USE_BUTTONS:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(18, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        global preset, lastbuttontime
+        global globalpreset, lastbuttontime
         while True:
             now = time.time()
             if not GPIO.input(18) and (now - lastbuttontime) > 0.2:
                 lastbuttontime = now
-                preset -= 1
-                if preset < 0:
-                    preset = 127
+                globalpreset -= 1
+                if globalpreset < 0:
+                    globalpreset = 127
                 LoadSamples()
             elif not GPIO.input(17) and (now - lastbuttontime) > 0.2:
                 lastbuttontime = now
-                preset += 1
-                if preset > 127:
-                    preset = 0
+                globalpreset += 1
+                if globalpreset > 127:
+                    globalpreset = 0
                 LoadSamples()
             time.sleep(0.020)
     ButtonsThread = threading.Thread(target=Buttons)
@@ -421,7 +428,8 @@ if USE_SERIALPORT_MIDI:
 #
 #########################################
 
-preset = 0
+globalpreset = 0
+globalcurrentmidichannel = 1
 LoadSamples()
 
 #########################################
